@@ -201,6 +201,8 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+  thread_yield_hp();
+
   return tid;
 }
 
@@ -237,7 +239,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  list_insert_ordered(&ready_list, &t->elem, priority_cmp, NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -308,7 +310,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+    list_insert_ordered(&ready_list, &cur->elem, priority_cmp, NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -335,7 +337,20 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+  enum intr_level old_level = intr_disable();
+
+  thread_current()->priority = new_priority;
+
+  /* if there's a higher priority thread, run it instead */
+  if(!list_empty(&ready_list))
+    {
+      struct thread* front_thread = list_entry(list_front(&ready_list), struct thread, elem);
+
+      if(new_priority < front_thread->priority)
+        thread_yield();
+    }
+
+  intr_set_level(old_level);
 }
 
 /* Returns the current thread's priority. */
@@ -592,6 +607,33 @@ wake_cmp(const struct list_elem* thread1,
   return t1->wake_time < t2->wake_time;
 }
 
+
+/* function to compare priorities, used to order ready_list */
+bool
+priority_cmp(const struct list_elem* thread1,
+         const struct list_elem* thread2,
+         void* aux UNUSED)
+{
+  struct thread *t1 = list_entry(thread1, struct thread, elem);
+  struct thread *t2 = list_entry(thread2, struct thread, elem);
+
+  return t1->priority > t2->priority;
+}
+
+void
+thread_yield_hp (void) 
+{
+  struct thread *cur = thread_current ();
+  struct thread* front_thread = list_entry(list_front(&ready_list), struct thread, elem);
+
+  if (cur->priority < front_thread->priority)
+    {
+      if (intr_context ())
+        intr_yield_on_return();
+      else
+        thread_yield();
+    }
+}
 
 
 
