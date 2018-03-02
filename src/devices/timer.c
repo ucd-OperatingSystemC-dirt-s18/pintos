@@ -20,6 +20,10 @@
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
 
+/* List of sleeping threads, ordered by soonest waking first */
+struct list sleep_list;
+
+
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
@@ -37,6 +41,7 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+  list_init(&sleep_list);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -89,11 +94,27 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 {
-  int64_t start = timer_ticks ();
+  /* no sleeping for 0 or less time */
+  if(ticks <= 0)
+    return;
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+
+  /* disable interrupts, save state to restore */
+  enum intr_level old_level = intr_disable ();
+
+  /* the thread which called sleep, set its wake time */
+  struct thread* current_thread = thread_current();
+  current_thread->wake_time = timer_ticks() + ticks;
+
+  /* put the thread in the sleep_list, in order */
+  list_insert_ordered(&sleep_list, &current_thread->elem, wake_cmp, NULL);
+
+  /* it's sleeping, don't let it run */
+  thread_block();
+
+  /* reenable interrupts */
+  intr_set_level(old_level);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -170,8 +191,36 @@ timer_print_stats (void)
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
+  /* record the passage of time */
   ticks++;
   thread_tick ();
+
+  /* pointers list element and thread */
+  struct list_elem* elem_ptr;
+  struct thread* thread_ptr;
+
+  /* flag for scheduling waking threads */
+  bool preempt = false;
+
+  /* while list isn't empty, check if a thread is ready to wake */
+  while(!list_empty(&sleep_list))
+    {
+      elem_ptr = list_front(&sleep_list);
+      thread_ptr = list_entry(elem_ptr, struct thread, elem);
+
+      /* not ready */
+      if(thread_ptr->wake_time > ticks)
+        break;
+
+      /* otherwise, delete it from sleep_list, and unblock it */
+      list_remove(elem_ptr);
+      thread_unblock(thread_ptr);
+      preempt = true;
+    }
+
+  /* someone woke up, schedule it */
+  if(preempt)
+    intr_yield_on_return();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

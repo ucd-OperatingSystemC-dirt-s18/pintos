@@ -578,6 +578,22 @@ allocate_tid (void)
 
   return tid;
 }
+
+
+/* function to compare wakeup times, used to order sleep_list */
+bool
+wake_cmp(const struct list_elem* thread1,
+         const struct list_elem* thread2,
+         void* aux UNUSED)
+{
+  struct thread *t1 = list_entry(thread1, struct thread, elem);
+  struct thread *t2 = list_entry(thread2, struct thread, elem);
+
+  return t1->wake_time < t2->wake_time;
+}
+
+
+
 
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
