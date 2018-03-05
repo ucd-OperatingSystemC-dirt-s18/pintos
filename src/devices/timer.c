@@ -195,6 +195,16 @@ timer_interrupt (struct intr_frame *args UNUSED)
   ticks++;
   thread_tick ();
 
+  if(thread_mlfqs)
+    {
+      mlfqs_incr_r_cpu();
+      if(ticks % TIMER_FREQ == 0)
+        mlfqs_refresh();
+      if(ticks % 4 == 0)
+        mlfqs_priority_update(thread_current());
+    }
+
+
   /* pointers list element and thread */
   struct list_elem* elem_ptr;
   struct thread* thread_ptr;

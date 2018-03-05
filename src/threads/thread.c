@@ -11,6 +11,10 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+
+#include "threads/fixed_point.h"
+
+
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -58,6 +62,9 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 bool thread_mlfqs;
+
+fixed_pt load_avg;
+
 
 static void kernel_thread (thread_func *, void *aux);
 
@@ -109,6 +116,8 @@ thread_start (void)
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
   thread_create ("idle", PRI_MIN, idle, &idle_started);
+
+  load_avg = FP_CONV(0);
 
   /* Start preemptive thread scheduling. */
   intr_enable ();
@@ -337,6 +346,10 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+  // don't need priority in mlfqs
+  if(thread_mlfqs)
+    return;
+
   struct thread* t = thread_current();
   int old_priority = t->eff_priority;
 
@@ -359,33 +372,32 @@ thread_get_priority (void)
 void
 thread_set_nice (int nice UNUSED) 
 {
-  /* Not yet implemented. */
+  thread_current()->nice = nice;
+  mlfqs_priority_update(thread_current());
+  thread_yield_hp();
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return thread_current()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return FP_FLOOR(FP_INT_MULT(load_avg, 100));
 }
 
-/* Returns 100 times the current thread's recent_cpu value. */
+/* Returns 100 times the current thread's r_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return FP_FLOOR(FP_INT_MULT(thread_current()->r_cpu, 100));
 }
-
+
 /* Idle thread.  Executes when no other thread is ready to run.
 
    The idle thread is initially put on the ready list by
@@ -474,10 +486,14 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->magic = THREAD_MAGIC;
 
+  // priority scheduler things
   t->eff_priority = priority;
   list_init(&t->locks);
   t->blocking_lock = NULL;
 
+  // mlfqs things
+  t->nice = 0;
+  t->r_cpu = FP_CONV(0);
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
@@ -669,6 +685,86 @@ priority_donate(struct thread *t)
       list_insert_ordered(&ready_list, &t->elem, priority_thread_cmp, NULL);
     }
   intr_set_level (old_level);
+}
+
+void
+mlfqs_incr_r_cpu(void)
+{
+  ASSERT(thread_mlfqs);
+  ASSERT(intr_context());
+
+  struct thread *t = thread_current();
+
+  if(t == idle_thread)
+    return;
+
+  t->r_cpu = FP_INT_ADD(t->r_cpu, 1);
+}
+
+
+void
+mlfqs_calc_r_cpu(struct thread* t)
+{
+  ASSERT(thread_mlfqs);
+  ASSERT(t != idle_thread);
+
+  fixed_pt scale = FP_DIV(FP_INT_MULT(load_avg, 2), FP_INT_ADD(FP_INT_MULT(load_avg, 2), 1));
+  fixed_pt val = FP_MULT(scale, t->r_cpu);
+  t->r_cpu = FP_INT_ADD(val, t->nice);
+}
+
+void
+mlfqs_priority_update(struct thread* t)
+{
+  if(t == idle_thread)
+    return;
+
+  ASSERT(thread_mlfqs);
+  ASSERT(t != idle_thread);
+
+  fixed_pt new_pri = FP_CONV(PRI_MAX);
+  new_pri = FP_SUB(new_pri, FP_INT_DIV(t->r_cpu, 4));
+  new_pri = FP_INT_SUB(new_pri, 2*t->nice);
+
+  t->eff_priority = FP_INT_PART(new_pri);
+
+  if(t->eff_priority < PRI_MIN)
+    t->eff_priority = PRI_MIN;
+
+  else if(t->eff_priority > PRI_MAX)
+    t->eff_priority = PRI_MAX;
+}
+
+
+void
+mlfqs_refresh(void)
+{
+  ASSERT(thread_mlfqs);
+  ASSERT(intr_context());
+
+  size_t ready_t = list_size(&ready_list);
+
+  if(thread_current() != idle_thread)
+    ++ready_t;
+
+  // calc load avg
+  load_avg = FP_ADD(FP_INT_DIV(FP_INT_MULT(load_avg, 59), 60), FP_INT_DIV(FP_CONV(ready_t), 60));
+
+
+  // recalculate each threads r_cpu
+  struct thread* t;
+  //  struct list_elem* e = list_begin(&all_list);
+
+  for(struct list_elem* e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e))
+    {
+      t = list_entry(e, struct thread, allelem);
+      if(t != idle_thread)
+        {
+          mlfqs_calc_r_cpu(t);
+          mlfqs_priority_update(t);
+        }
+    }
+
 }
 
 

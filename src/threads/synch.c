@@ -205,8 +205,8 @@ lock_acquire (struct lock *lock)
   struct lock* l = lock;
   int depth = 0;
 
-  // nested priority donation chain
-  if(lock->holder != NULL)
+  // nested priority donation chain, no need if mlfqs
+  if(!thread_mlfqs && lock->holder != NULL)
     {
       l = t->blocking_lock = lock;
 
@@ -223,16 +223,21 @@ lock_acquire (struct lock *lock)
   sema_down(&lock->semaphore);
 
   old_level = intr_disable();
-  t->blocking_lock = NULL;
-  lock->holder = t;
-  lock->highest_priority = t->eff_priority;
 
-  list_insert_ordered(&t->locks,
-                      &lock->elem,
-                      priority_thread_cmp,
-                      NULL);
-  if(t->status == THREAD_READY)
-    priority_update(t);
+  // priority stuff we don't need with mlfqs
+  if(!thread_mlfqs)
+    {
+      t->blocking_lock = NULL;
+      lock->highest_priority = t->eff_priority;
+
+      list_insert_ordered(&t->locks,
+                          &lock->elem,
+                          priority_thread_cmp,
+                          NULL);
+      if(t->status == THREAD_READY)
+        priority_update(t);
+    }
+  lock->holder = t;
 
   intr_set_level(old_level);
 }
@@ -270,8 +275,13 @@ lock_release (struct lock *lock)
 
   enum intr_level old_level = intr_disable();
 
-	list_remove(&lock->elem);
-  priority_update(thread_current());
+  // priority stuff not needed with mlfqs
+  if(!thread_mlfqs)
+    {
+      list_remove(&lock->elem);
+      priority_update(thread_current());
+    }
+
   lock->holder = NULL;
   sema_up(&lock->semaphore);
 

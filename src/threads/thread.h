@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/synch.h"
+#include "threads/fixed_point.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -101,6 +102,10 @@ struct thread
     struct list locks;                  /* Locks held */
     struct lock* blocking_lock;               /* Lock causing block */
 
+    /* mlfqs */
+    int nice;
+    fixed_pt r_cpu;
+
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -169,5 +174,12 @@ void thread_yield_hp(void);
 /* donation */
 void priority_update(struct thread*);
 void priority_donate(struct thread*);
+
+/* mlfqs */
+void mlfqs_incr_r_cpu(void);
+void mlfqs_calc_r_cpu(struct thread*);
+void mlfqs_priority_update(struct thread*);
+void mlfqs_refresh(void);
+
 
 #endif /* threads/thread.h */
