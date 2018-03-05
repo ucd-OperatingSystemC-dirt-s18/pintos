@@ -16,13 +16,13 @@ Christina Tsui
 >> If you have any preliminary comments on your submission, notes for the
 >> TAs, or extra credit, please give them here.
 
-Running low on time, MLFQS design area is sparse, comments in the code for that
-particular part of the assignment are also somewhat sparse  
+Running low on time, MLFQS design area is sparse  
 
 
 
-##### (old) Output:
+##### Output:
 ```
+pass tests/threads/mlfqs-block
 pass tests/threads/alarm-single
 pass tests/threads/alarm-multiple
 pass tests/threads/alarm-simultaneous
@@ -41,16 +41,16 @@ pass tests/threads/priority-preempt
 pass tests/threads/priority-sema
 pass tests/threads/priority-condvar
 pass tests/threads/priority-donate-chain
-FAIL tests/threads/mlfqs-load-1
-FAIL tests/threads/mlfqs-load-60
-FAIL tests/threads/mlfqs-load-avg
-FAIL tests/threads/mlfqs-recent-1
+pass tests/threads/mlfqs-load-1
+pass tests/threads/mlfqs-load-60
+pass tests/threads/mlfqs-load-avg
+pass tests/threads/mlfqs-recent-1
 pass tests/threads/mlfqs-fair-2
 pass tests/threads/mlfqs-fair-20
-FAIL tests/threads/mlfqs-nice-2
-FAIL tests/threads/mlfqs-nice-10
-FAIL tests/threads/mlfqs-block
-7 of 27 tests failed.
+pass tests/threads/mlfqs-nice-2
+pass tests/threads/mlfqs-nice-10
+pass tests/threads/mlfqs-block
+All 27 tests passed.
 ```
 
 			     ALARM CLOCK
