@@ -239,7 +239,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_insert_ordered(&ready_list, &t->elem, priority_cmp, NULL);
+  list_insert_ordered(&ready_list, &t->elem, priority_thread_cmp, NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -310,7 +310,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_insert_ordered(&ready_list, &cur->elem, priority_cmp, NULL);
+    list_insert_ordered(&ready_list, &cur->elem, priority_thread_cmp, NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -337,27 +337,22 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  enum intr_level old_level = intr_disable();
+  struct thread* t = thread_current();
+  int old_priority = t->eff_priority;
 
-  thread_current()->priority = new_priority;
-
-  /* if there's a higher priority thread, run it instead */
-  if(!list_empty(&ready_list))
+  t->priority = new_priority;
+  if(new_priority < old_priority && list_empty(&t->locks))
     {
-      struct thread* front_thread = list_entry(list_front(&ready_list), struct thread, elem);
-
-      if(new_priority < front_thread->priority)
-        thread_yield();
+      t->eff_priority = new_priority;
+      thread_yield_hp();
     }
-
-  intr_set_level(old_level);
 }
 
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) 
 {
-  return thread_current ()->priority;
+  return thread_current ()->eff_priority;
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -479,6 +474,11 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->magic = THREAD_MAGIC;
 
+  t->eff_priority = priority;
+  list_init(&t->locks);
+  t->blocking_lock = NULL;
+
+
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
@@ -590,6 +590,7 @@ allocate_tid (void)
   lock_acquire (&tid_lock);
   tid = next_tid++;
   lock_release (&tid_lock);
+  
 
   return tid;
 }
@@ -610,31 +611,65 @@ wake_cmp(const struct list_elem* thread1,
 
 /* function to compare priorities, used to order ready_list */
 bool
-priority_cmp(const struct list_elem* thread1,
+priority_thread_cmp(const struct list_elem* thread1,
          const struct list_elem* thread2,
          void* aux UNUSED)
 {
   struct thread *t1 = list_entry(thread1, struct thread, elem);
   struct thread *t2 = list_entry(thread2, struct thread, elem);
 
-  return t1->priority > t2->priority;
+  return t1->eff_priority > t2->eff_priority;
 }
 
 void
 thread_yield_hp (void) 
 {
-  struct thread *cur = thread_current ();
-  struct thread* front_thread = list_entry(list_front(&ready_list), struct thread, elem);
+  if(list_empty(&ready_list))
+    return;
+  enum intr_level old_level = intr_disable();
+  struct thread* t = thread_current();
+  struct thread* front = list_entry(list_front(&ready_list), struct thread, elem);
 
-  if (cur->priority < front_thread->priority)
-    {
-      if (intr_context ())
-        intr_yield_on_return();
-      else
-        thread_yield();
-    }
+  if (t->eff_priority < front->eff_priority)
+      thread_yield();
+  intr_set_level(old_level);
 }
 
+
+void
+priority_update(struct thread *t)
+{
+  enum intr_level old_level = intr_disable ();
+  int t_priority = t->priority;
+  int l_priority;
+
+  if (!list_empty(&t->locks))
+    {
+      list_sort (&t->locks, priority_lock_cmp, NULL);
+      l_priority = list_entry(list_front (&t->locks), struct lock, elem)->highest_priority;
+
+      if (t_priority < l_priority)
+        t_priority = l_priority;
+    }
+
+  t->eff_priority = t_priority;
+  intr_set_level (old_level);
+}
+
+
+void
+priority_donate(struct thread *t)
+{
+  enum intr_level old_level = intr_disable ();
+  priority_update(t);
+
+  if (t->status == THREAD_READY)
+    {
+      list_remove(&t->elem);
+      list_insert_ordered(&ready_list, &t->elem, priority_thread_cmp, NULL);
+    }
+  intr_set_level (old_level);
+}
 
 
 /* Offset of `stack' member within `struct thread'.

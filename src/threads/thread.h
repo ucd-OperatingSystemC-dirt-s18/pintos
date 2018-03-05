@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -23,6 +24,7 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+#define MAX_DEPTH 10                    /* Max depth of priority donation */
 
 /* A kernel thread or user process.
 
@@ -94,9 +96,10 @@ struct thread
 
     /* priority */
     int priority;                       /* Priority. */
-    int eff_priority;                   /* May be higher due to donation */
+    int eff_priority;               /* Priority donated from other thread */
+
     struct list locks;                  /* Locks held */
-    struct lock* blocker;               /* Lock causing block */
+    struct lock* blocking_lock;               /* Lock causing block */
 
 
     /* Shared between thread.c and synch.c. */
@@ -139,21 +142,32 @@ void thread_yield (void);
 typedef void thread_action_func (struct thread *t, void *aux);
 void thread_foreach (thread_action_func *, void *);
 
-int thread_get_priority (void);
-void thread_set_priority (int);
 
 int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
+/* alarm clock */
 /* compare wakeup times of two threads */
 bool wake_cmp(const struct list_elem*, const struct list_elem*, void*);
 
+
+/* priority scheduling */
+/* get, set for priority */
+int thread_get_priority (void);
+void thread_set_priority (int);
+
 /* compare priority of two threads */
-bool priority_cmp(const struct list_elem*, const struct list_elem*, void*);
+bool priority_thread_cmp(const struct list_elem*,
+                         const struct list_elem*,
+                         void*);
 
 /* if there's a thread of higher priority, yield to it */
 void thread_yield_hp(void);
+
+/* donation */
+void priority_update(struct thread*);
+void priority_donate(struct thread*);
 
 #endif /* threads/thread.h */
